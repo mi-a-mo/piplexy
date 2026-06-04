@@ -1,0 +1,30 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+Origin: piplexy
+Label: piplexy
+Suite: stable
+Codename: stable
+Architectures: arm64
+Components: main
+Description: piplexy APT repository
+MD5Sum:
+ 5455b138d2c6f2f652fe3f61c41b2ff1 main/binary-arm64/Packages.gz
+SHA256:
+ 352826e393fc36351b7ca366e979d648cff75397a3a1c5bcddd2ac713da5361d main/binary-arm64/Packages.gz
+-----BEGIN PGP SIGNATURE-----
+
+iQIzBAEBCgAdFiEEgqHeAen/YsHmd/mhHabCwYbdo30FAmogxooACgkQHabCwYbd
+o31kxw//SdhT/FB4eBLx5deq1WALuovnBmlp7Hml3l0JoNGZrOFtMeIRtXwIaxZ5
+SjyxDwBhuMPq6QUoPMJURcfqbTwIJI9LxeIPMpMCFaIrJl7aHU+LD+RWTAEO3NKa
+b7MmyZqxwj0r6zfyHb/mudDqIq4svJAS5MTvfCcBW389N1gXiYpAhXU7LYYrazU/
+M6xUHefpoqQ5KwDVEixDcqMEZ3TCMcEXm5v+rXUorfaeHdKx74kkhnaYnrAtTl4l
+P5nqdPjm8L+diPtF82L103uHP5Ieg3A44nlhtWyMLhcQZm9XURJpQ8j5WUq2NhW5
+Lo2DKEBqqa+BG3IKUTVxUxjSoMONKWfp4nyfWlEDAFlDuy3g9Awro/DdpGblyIyf
+GjPq4uCvl2ZMq0ydSp4+aoaf/ijs/tWvWOV3rjoddPPOOw39+5WpYDN0xwePFWFJ
+l8Yi6B0OUoQ8Ugn31sdy/cnmdPn+N8Rc6qcJZ8016XwsDUPiOny6iOWlI5aj2W9F
+ZYShItxiyYU9uF+SlG7FRJQhYkWZIldc1fXrAkLyqziDq/g5/yHxKd7RgvaE2F/y
+RT3R6522xMkGJlztq3D/RQIFOCqGqhm8sHHAJ5IYWlz/VGM93wuzdpwwQByAGcGe
+3yHiSwQLZxZu7/uzNAp5VF600gk88NwbuPrJ3omkcjv19jqSAzw=
+=eN7o
+-----END PGP SIGNATURE-----

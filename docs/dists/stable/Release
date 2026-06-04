@@ -1,0 +1,11 @@
+Origin: piplexy
+Label: piplexy
+Suite: stable
+Codename: stable
+Architectures: arm64
+Components: main
+Description: piplexy APT repository
+MD5Sum:
+ 5455b138d2c6f2f652fe3f61c41b2ff1 main/binary-arm64/Packages.gz
+SHA256:
+ 352826e393fc36351b7ca366e979d648cff75397a3a1c5bcddd2ac713da5361d main/binary-arm64/Packages.gz
