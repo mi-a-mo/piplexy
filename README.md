@@ -18,10 +18,11 @@ library configuration, and Samba sharing — through a simple terminal menu.
 ## Requirements
 
 - Raspberry Pi running Raspberry Pi OS (or any Debian-based distro)
-- `whiptail` — for the menu UI (`sudo apt install whiptail`)
-- `nmcli` — for network configuration (included in Pi OS)
 - An external USB drive formatted as exFAT, NTFS, ext2/3/4, or FAT32
 - Internet connection for downloading Plex and dependencies
+
+`whiptail`, `nmcli`, and `curl` are checked on startup and installed
+automatically if missing — no manual setup needed.
 
 ## Usage
 
