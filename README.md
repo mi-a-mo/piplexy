@@ -11,7 +11,7 @@ library configuration, and Samba sharing — through a simple terminal menu.
  |_| |___|_| |____|___/_/\_\_, |
                            |__/
 
-                PIPLEXy v1.1
+                PIPLEXy v1.2
      Raspberry Pi Plex Automation Suite
 ```
 
@@ -44,30 +44,37 @@ every action that would be taken — no changes are written.
 
 | Option | What it does |
 |---|---|
-| **1 — Set Static IP** | Scans the local subnet for a free IP and assigns it permanently via NetworkManager. Works on both Ethernet and Wi-Fi. |
-| **2 — Install Plex** | Adds the official Plex apt repository, installs Plex Media Server, and enables it as a systemd service. Skips safely if already installed. |
-| **3 — Detect & Mount Drive** | Auto-detects the connected USB drive, installs filesystem drivers if needed (exFAT, NTFS), adds a persistent fstab entry, and mounts at `/mnt/usb1`. |
-| **4 — Configure Plex Libraries** | Reads the Plex auth token from Preferences.xml and calls the Plex API to add Movies and TV Shows libraries from the mounted drive. |
-| **5 — Install & Configure Samba** | Installs Samba, adds a `[PLEX Media]` share pointing at the mounted drive, and sets your Samba password. |
-| **6 — Run Full Automation** | Runs all of the above steps in order — the one-shot setup option. |
-| **7 — Status Dashboard** | Shows a live summary of network, drive, Plex, Samba, and log status. |
-| **8 — Exit** | Exits. In dry-run mode, prints the full action summary first. |
+| **1 — Set Static IP** | Scans the subnet for a free IP, lets you review/edit it, asks for confirmation, then applies it permanently via NetworkManager. |
+| **2 — Install Plex** | Adds the official Plex apt repository, installs Plex Media Server, enables it as a service, and shows the URL to claim your server. Skips safely if already installed. |
+| **3 — Detect & Mount Drive** | Shows a picker of all connected partitions, installs filesystem drivers if needed (exFAT, NTFS), takes a timestamped fstab backup, and mounts at `/mnt/usb1`. |
+| **4 — Configure Plex Libraries** | Finds **all** Movies and TV folders on the drive (not just the first), adds them to Plex via the API, and triggers an immediate library scan. |
+| **5 — Install & Configure Samba** | Installs Samba, takes a timestamped smb.conf backup, adds a `[PLEX Media]` share, and sets your Samba password. |
+| **6 — Configure Firewall** | Installs and enables ufw, opening ports for SSH (22), Plex (32400), and Samba (445, 139). SSH is always opened first to prevent lockout. |
+| **7 — Run Full Automation** | Runs all of the above steps in order — the one-shot setup option. |
+| **8 — Status Dashboard** | Shows a live summary of network, drive, Plex (including masked token), Samba, firewall, and log status. |
+| **9 — Exit** | Exits. In dry-run mode, prints the full action summary first. |
 
 ## What Gets Configured
 
-**Static IP** — assigns a free address in the range `<your-subnet>.40–250` and
-sets it permanently on your active NetworkManager connection.
+**Static IP** — scans the range `<your-subnet>.40–250` for a free address,
+lets you edit it, confirms before applying, then sets it permanently on your
+active NetworkManager connection.
 
-**Drive** — mounts at `/mnt/usb1` with a UUID-based fstab entry so the mount
-survives reboots even if the device node changes. Installs `exfat-fuse` /
+**Drive** — shows a picker of all connected partitions with size and
+filesystem. Mounts at `/mnt/usb1` with a UUID-based fstab entry (timestamped
+backup taken first) so the mount survives reboots. Installs `exfat-fuse` /
 `exfatprogs` or `ntfs-3g` automatically for those filesystems.
 
-**Plex libraries** — looks for folders named `movies` and `tv` / `tv shows`
-on the mounted drive (case-insensitive) and registers them with Plex via the
-local API.
+**Plex libraries** — finds all folders named `movies` and `tv` / `tv shows`
+up to 3 levels deep, registers them all with Plex as a single library per
+type, and immediately triggers a library scan.
 
 **Samba** — creates a public, writable `[PLEX Media]` share at the mount
-point, accessible from Windows, macOS, and Linux on the same network.
+point (timestamped smb.conf backup taken first), accessible from Windows,
+macOS, and Linux on the same network.
+
+**Firewall** — installs and enables `ufw`, opening ports for SSH (22), Plex
+(32400), and Samba (445, 139). SSH is always opened first to prevent lockout.
 
 ## Logs
 
