@@ -17,8 +17,35 @@ cat << "EOF"
 EOF
 echo
 
-# Require whiptail
-command -v whiptail >/dev/null 2>&1 || { echo "ERROR: whiptail not installed. Run: sudo apt install whiptail"; exit 1; }
+#############################################
+# REQUIREMENTS CHECK
+#############################################
+check_requirements() {
+    # Map: command → apt package
+    declare -A REQUIRED=(
+        [whiptail]="whiptail"
+        [nmcli]="network-manager"
+        [curl]="curl"
+    )
+
+    local missing_pkgs=()
+    for cmd in "${!REQUIRED[@]}"; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            echo "Missing: $cmd (package: ${REQUIRED[$cmd]})"
+            missing_pkgs+=("${REQUIRED[$cmd]}")
+        fi
+    done
+
+    if [ ${#missing_pkgs[@]} -gt 0 ]; then
+        echo "Installing missing requirements..."
+        sudo apt update -y
+        sudo apt install -y "${missing_pkgs[@]}"
+        echo "Requirements installed."
+        echo
+    fi
+}
+
+check_requirements
 
 #############################################
 # LOGGING SETUP
