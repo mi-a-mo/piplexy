@@ -11,7 +11,7 @@ library configuration, and Samba sharing — through a simple terminal menu.
  |_| |___|_| |____|___/_/\_\_, |
                            |__/
 
-                PIPLEXy v1.0
+                PIPLEXy v1.1
      Raspberry Pi Plex Automation Suite
 ```
 
