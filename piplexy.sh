@@ -1,21 +1,24 @@
 #!/bin/bash
-set -e
+set -eo pipefail
 
 #############################################
 # PIPLEXY SPLASH (YOUR EXACT ASCII)
 #############################################
 clear
 cat << "EOF"
- ___ ___ ___ _    _____  __    
- | _ \_ _| _ \ |  | __\ \/ /  _ 
+ ___ ___ ___ _    _____  __
+ | _ \_ _| _ \ |  | __\ \/ /  _
  |  _/| ||  _/ |__| _| >  < || |
  |_| |___|_| |____|___/_/\_\_, |
-                           |__/ 
+                           |__/
 
                 PIPLEXy v1.0
      Raspberry Pi Plex Automation Suite
 EOF
 echo
+
+# Require whiptail
+command -v whiptail >/dev/null 2>&1 || { echo "ERROR: whiptail not installed. Run: sudo apt install whiptail"; exit 1; }
 
 #############################################
 # LOGGING SETUP
@@ -40,17 +43,18 @@ if [[ "$1" == "--dry-run" || "$1" == "-n" ]]; then
     echo
 fi
 
-# Verbose always on
 v() { log "[VERBOSE] $*"; }
 
-# Command wrapper
+# Run a command: log it, skip in dry-run, capture stdout+stderr to log.
+# Always pass args separately (run sudo apt install -y foo), not as a single
+# quoted string. For piped commands use: run bash -c "cmd1 | cmd2"
 run() {
     v "Running: $*"
     if $DRYRUN; then
         echo "[DRY RUN] Skipped execution."
         log "[DRY RUN] Skipped: $*"
     else
-        eval "$@" | tee -a "$LOGFILE"
+        "$@" 2>&1 | tee -a "$LOGFILE"
     fi
 }
 
@@ -81,6 +85,8 @@ set_static_ip() {
     echo "=== STATIC IP SETUP ==="
     log "Starting static IP setup"
 
+    local CURRENT_IP SUBNET GATEWAY DNS FREE_IP STATIC_IP CON_NAME
+
     CURRENT_IP=$(hostname -I | awk '{print $1}')
     v "Current IP: $CURRENT_IP"
 
@@ -97,9 +103,18 @@ set_static_ip() {
     echo "Scanning for free IP..."
     FREE_IP=""
     for i in {40..250}; do
-        TEST_IP="$SUBNET.$i"
-        ping -c1 -W1 "$TEST_IP" >/dev/null 2>&1 || { FREE_IP="$TEST_IP"; break; }
+        local TEST_IP="$SUBNET.$i"
+        if ! ping -c1 -W1 "$TEST_IP" >/dev/null 2>&1; then
+            FREE_IP="$TEST_IP"
+            break
+        fi
     done
+
+    if [ -z "$FREE_IP" ]; then
+        echo "ERROR: No free IP found in range $SUBNET.40–250."
+        log "ERROR: No free IP found."
+        exit 1
+    fi
 
     STATIC_IP="$FREE_IP/24"
     v "Selected static IP: $STATIC_IP"
@@ -108,9 +123,6 @@ set_static_ip() {
     SUMMARY_GATEWAY="$GATEWAY"
     SUMMARY_DNS="$DNS"
 
-    #############################################
-    # FIXED CONNECTION DETECTION (Ethernet or Wi‑Fi)
-    #############################################
     CON_NAME=$(nmcli -t -f NAME,DEVICE,TYPE connection show --active | head -n1 | cut -d: -f1)
 
     if [ -z "$CON_NAME" ]; then
@@ -121,12 +133,12 @@ set_static_ip() {
 
     v "Active connection: $CON_NAME"
 
-    run "sudo nmcli connection modify \"$CON_NAME\" ipv4.addresses \"$STATIC_IP\""
-    run "sudo nmcli connection modify \"$CON_NAME\" ipv4.gateway \"$GATEWAY\""
-    run "sudo nmcli connection modify \"$CON_NAME\" ipv4.dns \"$DNS\""
-    run "sudo nmcli connection modify \"$CON_NAME\" ipv4.method manual"
-    run "sudo nmcli connection down \"$CON_NAME\" || true"
-    run "sudo nmcli connection up \"$CON_NAME\""
+    run sudo nmcli connection modify "$CON_NAME" ipv4.addresses "$STATIC_IP"
+    run sudo nmcli connection modify "$CON_NAME" ipv4.gateway "$GATEWAY"
+    run sudo nmcli connection modify "$CON_NAME" ipv4.dns "$DNS"
+    run sudo nmcli connection modify "$CON_NAME" ipv4.method manual
+    run sudo nmcli connection down "$CON_NAME" || true
+    run sudo nmcli connection up "$CON_NAME"
 
     echo "Static IP applied: $STATIC_IP"
 }
@@ -144,20 +156,19 @@ install_plex() {
         return
     fi
 
-    run "sudo apt update"
-    run "sudo apt install -y curl wget gnupg apt-transport-https"
+    run sudo apt update
+    run sudo apt install -y curl wget gnupg apt-transport-https
 
     v "Adding Plex signing key..."
-    run "curl -L https://downloads.plex.tv/plex-keys/PlexSign.v2.key | sudo gpg --yes --dearmor -o /usr/share/keyrings/plexmediaserver.v2.gpg"
+    run bash -c "curl -L https://downloads.plex.tv/plex-keys/PlexSign.v2.key | sudo gpg --yes --dearmor -o /usr/share/keyrings/plexmediaserver.v2.gpg"
 
     v "Adding Plex repository..."
-    run "echo \"deb [signed-by=/usr/share/keyrings/plexmediaserver.v2.gpg] https://downloads.plex.tv/repo/deb public main\" | sudo tee /etc/apt/sources.list.d/plexmediaserver.list"
+    run bash -c "echo 'deb [signed-by=/usr/share/keyrings/plexmediaserver.v2.gpg] https://downloads.plex.tv/repo/deb public main' | sudo tee /etc/apt/sources.list.d/plexmediaserver.list"
 
-    run "sudo apt update"
-    run "sudo apt install -y plexmediaserver"
-
-    run "sudo systemctl enable plexmediaserver"
-    run "sudo systemctl start plexmediaserver"
+    run sudo apt update
+    run sudo apt install -y plexmediaserver
+    run sudo systemctl enable plexmediaserver
+    run sudo systemctl start plexmediaserver
 
     echo "Plex installed and running."
 }
@@ -169,7 +180,16 @@ mount_drive() {
     echo "=== DRIVE DETECTION & MOUNT ==="
     log "Mounting drive"
 
+    local DEVICE DEVICE_PATH FSTYPE OPTIONS UUID FSTAB_LINE
+
     DEVICE=$(lsblk -o NAME,TYPE,FSTYPE -nr | awk '$2=="part" && $3!="" {print $1; exit}')
+
+    if [ -z "$DEVICE" ]; then
+        echo "ERROR: No formatted partition detected. Is the drive plugged in?"
+        log "ERROR: No partition found."
+        exit 1
+    fi
+
     DEVICE_PATH="/dev/$DEVICE"
     FSTYPE=$(lsblk -o FSTYPE -nr "$DEVICE_PATH")
 
@@ -179,41 +199,59 @@ mount_drive() {
     SUMMARY_DEVICE="$DEVICE_PATH"
     SUMMARY_FSTYPE="$FSTYPE"
 
+    if mountpoint -q "$MOUNT_POINT"; then
+        echo "Drive already mounted at $MOUNT_POINT — skipping."
+        log "Already mounted — skipping."
+        return
+    fi
+
     case "$FSTYPE" in
         exfat)
-            run "sudo apt update"
-            run "sudo apt install -y exfat-fuse exfatprogs"
-            OPTIONS="defaults,uid=1000,gid=1000,fmask=0111,dmask=0000,allow_utime=0022"
+            run sudo apt update
+            run sudo apt install -y exfat-fuse exfatprogs
+            OPTIONS="defaults,uid=$(id -u),gid=$(id -g),fmask=0111,dmask=0000,allow_utime=0022"
             ;;
         ntfs)
-            run "sudo apt update"
-            run "sudo apt install -y ntfs-3g"
-            OPTIONS="defaults,uid=1000,gid=1000,umask=000"
+            run sudo apt update
+            run sudo apt install -y ntfs-3g
+            OPTIONS="defaults,uid=$(id -u),gid=$(id -g),umask=000"
             ;;
         ext4|ext3|ext2)
             OPTIONS="defaults"
             ;;
         *)
-            echo "Unsupported filesystem: $FSTYPE"
+            echo "ERROR: Unsupported filesystem: $FSTYPE"
+            log "ERROR: Unsupported filesystem: $FSTYPE"
             exit 1
             ;;
     esac
 
-    run "sudo mkdir -p \"$MOUNT_POINT\""
+    run sudo mkdir -p "$MOUNT_POINT"
 
     UUID=$(blkid -s UUID -o value "$DEVICE_PATH")
+
+    if [ -z "$UUID" ]; then
+        echo "ERROR: Could not read UUID from $DEVICE_PATH."
+        log "ERROR: Empty UUID."
+        exit 1
+    fi
+
     v "UUID: $UUID"
 
-    run "sudo cp /etc/fstab /etc/fstab.backup"
+    run sudo cp /etc/fstab /etc/fstab.backup
 
     FSTAB_LINE="UUID=$UUID  $MOUNT_POINT  $FSTYPE  $OPTIONS  0  0"
-    v "Adding fstab entry: $FSTAB_LINE"
-
+    v "fstab entry: $FSTAB_LINE"
     SUMMARY_FSTAB="$FSTAB_LINE"
 
-    run "echo \"$FSTAB_LINE\" | sudo tee -a /etc/fstab"
-    run "sudo mount -a"
-    run "sudo chown -R 1000:1000 \"$MOUNT_POINT\""
+    if $DRYRUN; then
+        log "[DRY RUN] Would add to /etc/fstab: $FSTAB_LINE"
+    else
+        echo "$FSTAB_LINE" | sudo tee -a /etc/fstab >> "$LOGFILE"
+    fi
+
+    run sudo mount -a
+    run sudo chown -R "$USER:$USER" "$MOUNT_POINT"
 
     echo "Drive mounted at $MOUNT_POINT"
 }
@@ -225,16 +263,15 @@ configure_plex() {
     echo "=== CONFIGURING PLEX LIBRARIES ==="
     log "Configuring Plex"
 
+    local PLEX_TOKEN MOVIES_DIR TV_DIR
+
     if [ ! -f "$PLEX_PREFS" ]; then
         echo "Plex preferences not found — Plex may not have run yet."
         log "Preferences.xml missing — skipping library setup."
         return
     fi
 
-    #############################################
-    # FIX: Read Preferences.xml with sudo
-    #############################################
-    PLEX_TOKEN=$(sudo sed -n 's/.*PlexOnlineToken="\([^"]*\)".*/\1/p' "$PLEX_PREFS" 2>/dev/null)
+    PLEX_TOKEN=$(sudo sed -n 's/.*PlexOnlineToken="\([^"]*\)".*/\1/p' "$PLEX_PREFS" 2>/dev/null || true)
 
     if [ -z "$PLEX_TOKEN" ]; then
         v "WARNING: Plex token missing — Plex may not be signed in yet."
@@ -242,8 +279,9 @@ configure_plex() {
         v "Plex token extracted."
     fi
 
-    MOVIES_DIR=$(find "$MOUNT_POINT" -type d -iname "movies" | head -n 1 || true)
-    TV_DIR=$(find "$MOUNT_POINT" -type d \( -iname "tv" -o -iname "tv shows" \) | head -n 1 || true)
+    # Use -print -quit to avoid SIGPIPE from head
+    MOVIES_DIR=$(find "$MOUNT_POINT" -type d -iname "movies" -print -quit 2>/dev/null || true)
+    TV_DIR=$(find "$MOUNT_POINT" -type d \( -iname "tv" -o -iname "tv shows" \) -print -quit 2>/dev/null || true)
 
     v "Movies folder: ${MOVIES_DIR:-none}"
     v "TV folder: ${TV_DIR:-none}"
@@ -252,21 +290,18 @@ configure_plex() {
     SUMMARY_TV="$TV_DIR"
 
     add_library() {
-        TYPE=$1
-        NAME=$2
-        PATH=$3
-
-        echo "Adding Plex library: $NAME → $PATH"
-        run "curl -s -X POST \
-            -H \"X-Plex-Token: $PLEX_TOKEN\" \
-            \"$SERVER_URL/library/sections\" \
-            --data-urlencode \"type=$TYPE\" \
-            --data-urlencode \"name=$NAME\" \
-            --data-urlencode \"location=$PATH\" >/dev/null"
+        local type=$1 name=$2 media_path=$3   # media_path avoids shadowing $PATH
+        echo "Adding Plex library: $name → $media_path"
+        run curl -s -X POST \
+            -H "X-Plex-Token: $PLEX_TOKEN" \
+            "$SERVER_URL/library/sections" \
+            --data-urlencode "type=$type" \
+            --data-urlencode "name=$name" \
+            --data-urlencode "location=$media_path"
     }
 
     [ -n "$MOVIES_DIR" ] && [ -n "$PLEX_TOKEN" ] && add_library 1 "Movies" "$MOVIES_DIR"
-    [ -n "$TV_DIR" ] && [ -n "$PLEX_TOKEN" ] && add_library 2 "TV Shows" "$TV_DIR"
+    [ -n "$TV_DIR" ]     && [ -n "$PLEX_TOKEN" ] && add_library 2 "TV Shows" "$TV_DIR"
 
     echo "Plex libraries configured."
 }
@@ -278,10 +313,11 @@ install_samba() {
     echo "=== INSTALLING SAMBA FOR MEDIA SHARING ==="
     log "Installing Samba"
 
-    run "sudo apt update"
-    run "sudo apt install -y samba"
+    local SAMBA_BLOCK
 
-    run "sudo cp /etc/samba/smb.conf /etc/samba/smb.conf.backup"
+    run sudo apt update
+    run sudo apt install -y samba
+    run sudo cp /etc/samba/smb.conf /etc/samba/smb.conf.backup
 
     SAMBA_BLOCK="
 [PLEX Media]
@@ -293,18 +329,24 @@ install_samba() {
    directory mask = 0775
    public = yes
 "
-
-    v "Samba config block:"
-    v "$SAMBA_BLOCK"
-
+    v "Samba config block:$SAMBA_BLOCK"
     SUMMARY_SAMBA_SHARE="$MOUNT_POINT"
 
-    run "echo \"$SAMBA_BLOCK\" | sudo tee -a /etc/samba/smb.conf"
+    if $DRYRUN; then
+        log "[DRY RUN] Would append Samba block to /etc/samba/smb.conf"
+    else
+        printf '%s\n' "$SAMBA_BLOCK" | sudo tee -a /etc/samba/smb.conf >> "$LOGFILE"
+    fi
 
+    # smbpasswd is interactive — run it directly, not through the tee pipeline
     echo "Setting Samba password for user: $USER"
-    run "sudo smbpasswd -a $USER"
+    if $DRYRUN; then
+        log "[DRY RUN] Would run: sudo smbpasswd -a $USER"
+    else
+        sudo smbpasswd -a "$USER"
+    fi
 
-    run "sudo systemctl restart smbd"
+    run sudo systemctl restart smbd
 
     echo "Samba installed and configured."
 }
@@ -326,56 +368,64 @@ run_full() {
 }
 
 #############################################
-# MODULE 7: STATUS DASHBOARD (FIXED)
+# MODULE 7: STATUS DASHBOARD
 #############################################
 status_dashboard() {
+    local STATUS CURRENT_IP ACTIVE_CON GATEWAY DNS DEVICE DEVICE_PATH FSTYPE TOKEN
+
     STATUS=""
 
     STATUS+="NETWORK STATUS\n"
     STATUS+="------------------------------\n"
     CURRENT_IP=$(hostname -I | awk '{print $1}')
     STATUS+="Current IP: $CURRENT_IP\n"
-    ACTIVE_CON=$(nmcli -t -f NAME,DEVICE,TYPE connection show --active | head -n1 | cut -d: -f1)
+    ACTIVE_CON=$(nmcli -t -f NAME,DEVICE,TYPE connection show --active 2>/dev/null | head -n1 | cut -d: -f1 || true)
     STATUS+="Active connection: ${ACTIVE_CON:-none}\n"
-    GATEWAY=$(ip route | grep default | awk '{print $3}')
+    GATEWAY=$(ip route 2>/dev/null | awk '/default/{print $3; exit}')
     STATUS+="Gateway: ${GATEWAY:-none}\n"
-    DNS=$(grep nameserver /etc/resolv.conf | head -n1 | awk '{print $2}')
+    DNS=$(grep nameserver /etc/resolv.conf 2>/dev/null | head -n1 | awk '{print $2}')
     STATUS+="DNS: ${DNS:-none}\n\n"
 
     STATUS+="DRIVE STATUS\n"
     STATUS+="------------------------------\n"
-    DEVICE=$(lsblk -o NAME,TYPE,FSTYPE -nr | awk '$2=="part" {print $1; exit}')
-    DEVICE_PATH="/dev/$DEVICE"
-    STATUS+="Detected device: ${DEVICE_PATH:-none}\n"
-    FSTYPE=$(lsblk -o FSTYPE -nr "$DEVICE_PATH")
-    STATUS+="Filesystem: ${FSTYPE:-none}\n"
+    DEVICE=$(lsblk -o NAME,TYPE,FSTYPE -nr 2>/dev/null | awk '$2=="part" {print $1; exit}')
+    if [ -n "$DEVICE" ]; then
+        DEVICE_PATH="/dev/$DEVICE"
+        FSTYPE=$(lsblk -o FSTYPE -nr "$DEVICE_PATH" 2>/dev/null || true)
+        STATUS+="Detected device: $DEVICE_PATH\n"
+        STATUS+="Filesystem: ${FSTYPE:-unknown}\n"
+    else
+        STATUS+="Detected device: none\n"
+        STATUS+="Filesystem: none\n"
+    fi
     STATUS+="Mount point: $MOUNT_POINT\n"
-    mount | grep -q "$MOUNT_POINT" && STATUS+="Mounted: yes\n" || STATUS+="Mounted: no\n"
-    grep -q "$MOUNT_POINT" /etc/fstab && STATUS+="fstab entry: present\n\n" || STATUS+="fstab entry: missing\n\n"
+    mountpoint -q "$MOUNT_POINT" 2>/dev/null && STATUS+="Mounted: yes\n" || STATUS+="Mounted: no\n"
+    grep -q "$MOUNT_POINT" /etc/fstab 2>/dev/null && STATUS+="fstab entry: present\n\n" || STATUS+="fstab entry: missing\n\n"
 
     STATUS+="PLEX STATUS\n"
     STATUS+="------------------------------\n"
-    dpkg -l | grep -q plexmediaserver && STATUS+="Installed: yes\n" || STATUS+="Installed: no\n"
-    systemctl is-active --quiet plexmediaserver && STATUS+="Service: running\n" || STATUS+="Service: stopped\n"
+    dpkg -l 2>/dev/null | grep -q plexmediaserver && STATUS+="Installed: yes\n" || STATUS+="Installed: no\n"
+    systemctl is-active --quiet plexmediaserver 2>/dev/null && STATUS+="Service: running\n" || STATUS+="Service: stopped\n"
     [ -f "$PLEX_PREFS" ] && STATUS+="Preferences.xml: found\n" || STATUS+="Preferences.xml: missing\n"
-    TOKEN=$(sudo sed -n 's/.*PlexOnlineToken="\([^"]*\)".*/\1/p' "$PLEX_PREFS" 2>/dev/null)
+    TOKEN=$(sudo sed -n 's/.*PlexOnlineToken="\([^"]*\)".*/\1/p' "$PLEX_PREFS" 2>/dev/null || true)
     [ -n "$TOKEN" ] && STATUS+="Plex token: present\n\n" || STATUS+="Plex token: missing\n\n"
 
     STATUS+="SAMBA STATUS\n"
     STATUS+="------------------------------\n"
-    dpkg -l | grep -q samba && STATUS+="Installed: yes\n" || STATUS+="Installed: no\n"
-    systemctl is-active --quiet smbd && STATUS+="Service: running\n" || STATUS+="Service: stopped\n"
-    grep -q "
-
-\[PLEX Media\]
-
-" /etc/samba/smb.conf && STATUS+="PLEX Media share: present\n\n" || STATUS+="PLEX Media share: missing\n\n"
+    dpkg -l 2>/dev/null | grep -q samba && STATUS+="Installed: yes\n" || STATUS+="Installed: no\n"
+    systemctl is-active --quiet smbd 2>/dev/null && STATUS+="Service: running\n" || STATUS+="Service: stopped\n"
+    grep -q '^\[PLEX Media\]' /etc/samba/smb.conf 2>/dev/null && STATUS+="PLEX Media share: present\n\n" || STATUS+="PLEX Media share: missing\n\n"
 
     STATUS+="PIPLEXy STATUS\n"
     STATUS+="------------------------------\n"
     STATUS+="Log file: $LOGFILE\n"
-    STATUS+="Log size: $(du -h "$LOGFILE" | awk '{print $1}')\n"
-    STATUS+="Last modified: $(date -r "$LOGFILE")\n"
+    if [ -f "$LOGFILE" ]; then
+        STATUS+="Log size: $(du -h "$LOGFILE" | awk '{print $1}')\n"
+        STATUS+="Last modified: $(date -r "$LOGFILE")\n"
+    else
+        STATUS+="Log size: 0\n"
+        STATUS+="Last modified: never\n"
+    fi
 
     whiptail --title "PIPLEXy Status Dashboard" --msgbox "$STATUS" 30 80
 }
@@ -415,7 +465,7 @@ dry_run_summary() {
 }
 
 #############################################
-# MENU UI (EXIT MOVED TO BOTTOM)
+# MENU UI
 #############################################
 while true; do
     CHOICE=$(whiptail --title "PIPLEXy — Plex Automation Suite" \
@@ -444,4 +494,3 @@ while true; do
             ;;
     esac
 done
-
